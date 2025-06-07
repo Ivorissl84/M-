@@ -1,52 +1,89 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Verfügbarkeiten</title>
+    <title>Gilden-Verfügbarkeit</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 30px; background-color: #f9f9f9; }
+        h1, h2 { color: #333; }
+        form, table, .group { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 30px; }
+        input, select, button { margin: 5px; padding: 5px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ccc; padding: 10px; text-align: center; }
+        .group { border-left: 5px solid #007bff; }
+    </style>
 </head>
 <body>
-    <h1>Trage deine Verfügbarkeit ein</h1>
-    <form method="POST">
-        Name: <input type="text" name="name" required><br>
-        Wochentag:
+    <h1>🛡️ Gilden-Verfügbarkeit</h1>
+    <form method="post" action="/submit">
+        <label>Name:</label><input type="text" name="name" required>
+        <label>Rolle:</label>
+        <select name="role">
+            <option value="Tank">Tank</option>
+            <option value="Heiler">Heiler</option>
+            <option value="DPS">DPS</option>
+        </select>
+        <label>Wochentag:</label>
         <select name="weekday">
-            <option>Montag</option>
-            <option>Dienstag</option>
-            <option>Mittwoch</option>
-            <option>Donnerstag</option>
-            <option>Freitag</option>
-            <option>Samstag</option>
-            <option>Sonntag</option>
-        </select><br>
-        Startzeit: <input type="time" name="start_time" required><br>
-        Endzeit: <input type="time" name="end_time" required><br>
-        <button type="submit">Eintragen</button>
+            <option>Montag</option><option>Dienstag</option><option>Mittwoch</option>
+            <option>Donnerstag</option><option>Freitag</option>
+            <option>Samstag</option><option>Sonntag</option>
+        </select>
+        <label>Startzeit:</label><input type="time" name="start_time" required>
+        <label>Endzeit:</label><input type="time" name="end_time" required>
+        <button type="submit">Eintragen / Aktualisieren</button>
     </form>
 
-    <h2>Alle Einträge</h2>
-    <ul>
-        {% for name, day, start, end in data %}
-        <li>{{ name }} – {{ day }}: {{ start }} bis {{ end }}</li>
+    <h2>📋 Aktuelle Verfügbarkeiten</h2>
+    <table>
+        <tr><th>Name</th><th>Rolle</th><th>Wochentag</th><th>Start</th><th>Ende</th></tr>
+        {% for name, role, weekday, start, end in entries %}
+        <tr>
+            <td>{{ name }}</td><td>{{ role }}</td><td>{{ weekday }}</td><td>{{ start }}</td><td>{{ end }}</td>
+        </tr>
         {% endfor %}
-    </ul>
+    </table>
 
-    <h2>Überschneidungen (≥ 2 Stunden)</h2>
-    {% for day, pairs in overlaps.items() %}
-        <h3>{{ day }}</h3>
-        <ul>
-        {% for name1, name2, duration in pairs %}
-            <li>{{ name1 }} und {{ name2 }} – gleichzeitig online ({{ duration }})</li>
+    <h2>🤝 Mögliche Gruppen (exakt 1 Tank, 1 Heiler, 3 DPS)</h2>
+    {% set shown_groups = [] %}
+    {% for wday in ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"] %}
+        {% set tanks = entries | selectattr("2", "equalto", wday) | selectattr("1", "equalto", "Tank") | list %}
+        {% set healers = entries | selectattr("2", "equalto", wday) | selectattr("1", "equalto", "Heiler") | list %}
+        {% set dps = entries | selectattr("2", "equalto", wday) | selectattr("1", "equalto", "DPS") | list %}
+        {% for tank in tanks %}
+            {% for healer in healers %}
+                {% for d1 in dps %}
+                    {% for d2 in dps %}
+                        {% for d3 in dps %}
+                            {% if d1 != d2 and d1 != d3 and d2 != d3 %}
+                                {% set group = [tank, healer, d1, d2, d3] %}
+
+                                {# Gemeinsame Zeit berechnen #}
+                                {% set latest_start = group | map(attribute=3) | max %}
+                                {% set earliest_end = group | map(attribute=4) | min %}
+
+                                {% if latest_start < earliest_end %}
+                                    {% set names = group | map(attribute=0) | sort %}
+                                    {% if names not in shown_groups %}
+                                        {% set _ = shown_groups.append(names) %}
+                                        <div class="group">
+                                            <strong>{{ wday }} – {{ latest_start }} bis {{ earliest_end }}</strong><br>
+                                            <em>1 Tank, 1 Heiler, 3 DPS</em><br><br>
+                                            {% for p in group %}
+                                                {{ p[0] }} ({{ p[1] }}) von {{ p[3] }} bis {{ p[4] }}<br>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                {% endif %}
+                            {% endif %}
+                        {% endfor %}
+                    {% endfor %}
+                {% endfor %}
+            {% endfor %}
         {% endfor %}
-        </ul>
     {% endfor %}
 
-    <h2>Automatisch vorgeschlagene Gruppen</h2>
-    {% for day, group_list in groups.items() %}
-        <h3>{{ day }}</h3>
-        <ul>
-        {% for group in group_list %}
-            <li>Gruppe: {{ group | join(", ") }}</li>
-        {% endfor %}
-        </ul>
-    {% endfor %}
+    {% if shown_groups == [] %}
+        <p>Aktuell keine Gruppen mit exakt 1 Tank, 1 Heiler und 3 DPS und gemeinsamer Zeitüberschneidung.</p>
+    {% endif %}
 </body>
 </html>
