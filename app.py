@@ -26,6 +26,26 @@ def init_db():
 
 init_db()
 
+import os
+import psycopg2
+from flask import Flask, request, render_template
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+cur = conn.cursor()
+cur.execute('''
+    CREATE TABLE IF NOT EXISTS availability (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        weekday TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL
+    )
+''')
+conn.commit()
+
 DB_NAME = "availability.db"
 
 def init_db():
