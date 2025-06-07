@@ -1,159 +1,78 @@
-
-from flask import Flask, render_template, request, redirect
-import sqlite3
-from datetime import datetime, timedelta
-from collections import defaultdict
+import os
+import psycopg2
+from flask import Flask, request, render_template, redirect
 
 app = Flask(__name__)
 
-import os
+# Hole PostgreSQL-Verbindungs-URL aus Umgebungsvariablen
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# Sicherstellen, dass die Datenbank und Tabelle existiert
+# Initialisiere Datenbankverbindung
+def get_db_connection():
+    conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+    return conn
+
+# Tabelle erstellen (nur beim ersten Start erforderlich)
 def init_db():
-    conn = sqlite3.connect('data.db')
-    c = conn.cursor()
-    c.execute('''
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS availability (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
+            role TEXT NOT NULL,
             weekday TEXT NOT NULL,
             start_time TEXT NOT NULL,
             end_time TEXT NOT NULL
         )
-    ''')
+    """)
     conn.commit()
+    cur.close()
     conn.close()
 
-init_db()
-
-import os
-import psycopg2
-from flask import Flask, request, render_template
-
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
-conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-cur = conn.cursor()
-cur.execute('''
-    CREATE TABLE IF NOT EXISTS availability (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        role TEXT NOT NULL,
-        weekday TEXT NOT NULL,
-        start_time TEXT NOT NULL,
-        end_time TEXT NOT NULL
-    )
-''')
-conn.commit()
-
-DB_NAME = "availability.db"
-
-def init_db():
-    with sqlite3.connect(DB_NAME) as conn:
-        c = conn.cursor()
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS availability (
-            name TEXT,
-            weekday TEXT,
-            start_time TEXT,
-            end_time TEXT,
-            UNIQUE(name, weekday)
-        )
-        """)
-        conn.commit()
-
-@app.route("/", methods=["GET", "POST"])
+@app.route('/', methods=['GET'])
 def index():
-    if request.method == "POST":
-        name = request.form["name"]
-        weekday = request.form["weekday"]
-        start_time = request.form["start_time"]
-        end_time = request.form["end_time"]
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT name, role, weekday, start_time, end_time FROM availability ORDER BY weekday, start_time")
+    entries = cur.fetchall()
+    cur.close()
+    conn.close()
+    return render_template('index.html', entries=entries)
 
-        with sqlite3.connect(DB_NAME) as conn:
-            c = conn.cursor()
-            c.execute("""
-                INSERT OR REPLACE INTO availability (name, weekday, start_time, end_time)
-                VALUES (?, ?, ?, ?)
-            """, (name, weekday, start_time, end_time))
-            conn.commit()
+@app.route('/submit', methods=['POST'])
+def submit():
+    name = request.form['name']
+    role = request.form['role']
+    weekday = request.form['weekday']
+    start_time = request.form['start_time']
+    end_time = request.form['end_time']
 
-        return redirect("/")
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-    with sqlite3.connect(DB_NAME) as conn:
-        c = conn.cursor()
-        c.execute("SELECT * FROM availability")
-        data = c.fetchall()
+    # Prüfen, ob Spieler bereits einen Eintrag hat
+    cur.execute("SELECT id FROM availability WHERE name = %s", (name,))
+    existing = cur.fetchone()
 
-    overlaps = find_overlaps(data)
-    groups = generate_groups(data)
-    return render_template("index.html", data=data, overlaps=overlaps, groups=groups)
+    if existing:
+        cur.execute("""
+            UPDATE availability
+            SET role = %s, weekday = %s, start_time = %s, end_time = %s
+            WHERE name = %s
+        """, (role, weekday, start_time, end_time, name))
+    else:
+        cur.execute("""
+            INSERT INTO availability (name, role, weekday, start_time, end_time)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (name, role, weekday, start_time, end_time))
 
-def find_overlaps(entries):
-    result = defaultdict(list)
-    by_day = defaultdict(list)
-    for name, day, start, end in entries:
-        by_day[day].append((name, start, end))
+    conn.commit()
+    cur.close()
+    conn.close()
 
-    for day, entries in by_day.items():
-        for i in range(len(entries)):
-            name1, start1, end1 = entries[i]
-            t1_start = datetime.strptime(start1, "%H:%M")
-            t1_end = datetime.strptime(end1, "%H:%M")
+    return redirect('/')
 
-            for j in range(i + 1, len(entries)):
-                name2, start2, end2 = entries[j]
-                t2_start = datetime.strptime(start2, "%H:%M")
-                t2_end = datetime.strptime(end2, "%H:%M")
-
-                latest_start = max(t1_start, t2_start)
-                earliest_end = min(t1_end, t2_end)
-                overlap = (earliest_end - latest_start).total_seconds() / 3600
-
-                if overlap >= 2:
-                    result[day].append((name1, name2, f"{overlap:.1f} Std"))
-    return result
-
-def generate_groups(entries):
-    groups_by_day = defaultdict(list)
-    by_day = defaultdict(list)
-
-    for name, day, start, end in entries:
-        by_day[day].append((name, start, end))
-
-    for day, items in by_day.items():
-        used = set()
-        for i in range(len(items)):
-            n1, s1, e1 = items[i]
-            t1_start = datetime.strptime(s1, "%H:%M")
-            t1_end = datetime.strptime(e1, "%H:%M")
-
-            group = [n1]
-            for j in range(len(items)):
-                if i == j: continue
-                n2, s2, e2 = items[j]
-                if n2 in used or n1 in used:
-                    continue
-
-                t2_start = datetime.strptime(s2, "%H:%M")
-                t2_end = datetime.strptime(e2, "%H:%M")
-
-                latest_start = max(t1_start, t2_start)
-                earliest_end = min(t1_end, t2_end)
-                overlap = (earliest_end - latest_start).total_seconds() / 3600
-
-                if overlap >= 2:
-                    group.append(n2)
-
-            if len(group) >= 2:
-                group = sorted(set(group))
-                if not any(set(group).issubset(set(g)) for g in groups_by_day[day]):
-                    groups_by_day[day].append(group)
-                    used.update(group)
-
-    return groups_by_day
-
-if __name__ == "__main__":
-    init_db()
+if __name__ == '__main__':
+    init_db()  # nur beim lokalen Start, nicht bei Render nötig
     app.run(debug=True)
-
