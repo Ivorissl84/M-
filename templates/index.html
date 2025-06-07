@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Verfügbarkeiten</title>
+</head>
+<body>
+    <h1>Trage deine Verfügbarkeit ein</h1>
+    <form method="POST">
+        Name: <input type="text" name="name" required><br>
+        Wochentag:
+        <select name="weekday">
+            <option>Montag</option>
+            <option>Dienstag</option>
+            <option>Mittwoch</option>
+            <option>Donnerstag</option>
+            <option>Freitag</option>
+            <option>Samstag</option>
+            <option>Sonntag</option>
+        </select><br>
+        Startzeit: <input type="time" name="start_time" required><br>
+        Endzeit: <input type="time" name="end_time" required><br>
+        <button type="submit">Eintragen</button>
+    </form>
+
+    <h2>Alle Einträge</h2>
+    <ul>
+        {% for name, day, start, end in data %}
+        <li>{{ name }} – {{ day }}: {{ start }} bis {{ end }}</li>
+        {% endfor %}
+    </ul>
+
+    <h2>Überschneidungen (≥ 2 Stunden)</h2>
+    {% for day, pairs in overlaps.items() %}
+        <h3>{{ day }}</h3>
+        <ul>
+        {% for name1, name2, duration in pairs %}
+            <li>{{ name1 }} und {{ name2 }} – gleichzeitig online ({{ duration }})</li>
+        {% endfor %}
+        </ul>
+    {% endfor %}
+
+    <h2>Automatisch vorgeschlagene Gruppen</h2>
+    {% for day, group_list in groups.items() %}
+        <h3>{{ day }}</h3>
+        <ul>
+        {% for group in group_list %}
+            <li>Gruppe: {{ group | join(", ") }}</li>
+        {% endfor %}
+        </ul>
+    {% endfor %}
+</body>
+</html>
